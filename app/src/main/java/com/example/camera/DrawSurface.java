@@ -4,11 +4,13 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.graphics.PorterDuff;
 import android.os.Build;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.Display;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
@@ -16,6 +18,8 @@ import android.view.SurfaceView;
 import android.view.WindowManager;
 
 import androidx.annotation.RequiresApi;
+
+//Based on the sample provided by the tutor: Chritopher J. Getschmann
 
 @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
 class DrawSurface extends SurfaceView implements SurfaceHolder.Callback {
@@ -30,14 +34,18 @@ class DrawSurface extends SurfaceView implements SurfaceHolder.Callback {
     private final Context context;
 
     public Paint paintGreen = null;
-    public Paint paintRed = null;
-
-    private float angle = (float) Math.toRadians(10d);
+    public Paint paintBlack = null;
 
     private float length;
-    private float x1, y1;
-    private float x2, y2;
-    float a, b, c, d;
+    long t0; float t;//x-axis time value t
+    float width, height;//screen parameters
+    float previous=0;//storage for old x-axis value
+    double n=0;
+
+    float acceleration;//acceleration value
+    double beat;//light intensity value
+    Path path;//path for plotting accelerometer data
+    Path path2;//path for ppg plot
 
     public DrawSurface(Context context) {
         super(context);
@@ -57,7 +65,7 @@ class DrawSurface extends SurfaceView implements SurfaceHolder.Callback {
         init();
     }
 
-    private void init() {
+    public void init() {
         holder = getHolder();
         holder.addCallback(this);
         holder.setFormat(PixelFormat.TRANSPARENT);
@@ -68,23 +76,26 @@ class DrawSurface extends SurfaceView implements SurfaceHolder.Callback {
         paintGreen = new Paint(Paint.ANTI_ALIAS_FLAG);
         paintGreen.setColor(Color.GREEN);
         paintGreen.setStyle(Paint.Style.STROKE);
-        paintGreen.setStrokeWidth(10.0f);
+        paintGreen.setStrokeWidth(2.0f);
 
-        paintRed = new Paint(Paint.ANTI_ALIAS_FLAG);
-        paintRed.setColor(Color.GREEN);
-        paintRed.setStyle(Paint.Style.STROKE);
-        paintRed.setStrokeWidth(paintGreen.getStrokeWidth());
+        paintBlack = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paintBlack.setColor(Color.BLACK);
+        paintBlack.setStyle(Paint.Style.STROKE);
+        paintBlack.setStrokeWidth(paintGreen.getStrokeWidth());
 
         //https://stackoverflow.com/questions/1016896/how-to-get-screen-dimensions-as-pixels-in-android/1016941#1016941
         WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
         Display display = wm.getDefaultDisplay();
         Point size = new Point();
         display.getSize(size);
-        float width = size.x;
-        float height = size.y;
+        width = size.x;
+        height = size.y;
         length=width/2;
-        x1=length-(width/4); x2=length+(width/4);
-        y1=height/2; y2=height/2;
+
+        //intialize plots; get current time for calculating updates
+        path=new Path();
+        path2=new Path();
+        t0=System.currentTimeMillis();
     }
 
     public void setCallback(DrawSurfaceCallback onReadyCallback) {
@@ -112,19 +123,38 @@ class DrawSurface extends SurfaceView implements SurfaceHolder.Callback {
         holder.unlockCanvasAndPost(canvas);
     }
 
-    public void setAngle(float theta) {
-        a=(float)(540+((x1-540)*Math.cos(theta)+(1002-y1)*Math.sin(theta)));
-        b=(float)(540+((x2-540)*Math.cos(theta)+(1002-y2)*Math.sin(theta)));
+    public void setAcceleration(float val) {
+        acceleration=1000*val;//scale
+        invalidate();
+    }
 
-        c=(float)(1002-((1002-y1)*Math.cos(theta)-(x1-540)*Math.sin(theta)));
-        d=(float)(1002-((1002-y2)*Math.cos(theta)-(x2-540)*Math.sin(theta)));
+    public void setBeat(double beat){
+        this.beat=5*beat;//scale
         invalidate();
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
+        n++;
         super.onDraw(canvas);
-        canvas.drawLine(a, c, b, d, new Paint());
+        float maxX=width;
+        float minYa= (float) (height/1.5);//accelerometer min
+        float minYb=height/3;//beat min
+        //Log.w(TAG, "onDraw: "+(minY+c)+ " : "+(minY+d) );
+
+        t=(System.currentTimeMillis()-t0)/50;//this equals around 1 pix; optimal value found by trial & error instead of ab-initio
+
+        if (t>=maxX){//move plot to left when it reaches the end of the screen on the right side
+            path.offset((float) (-(t-previous)),0);
+            path2.offset((float) (-(t-previous)), 0);
+        }
+        previous=t;//update previous value for next offset operation
+
+        path.lineTo(t-10, minYa+acceleration);//-10 to drop initial noise
+        canvas.drawPath(path, paintGreen);
+
+        path2.lineTo(t-10, (float) (minYb-beat));//invert y
+        canvas.drawPath(path2, paintBlack);
     }
 
     @Override
